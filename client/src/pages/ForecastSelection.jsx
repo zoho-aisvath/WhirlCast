@@ -103,7 +103,7 @@ export default function ForecastSelection() {
   const [search, setSearch]           = useState('');
   const [filterAlgo, setFilterAlgo]   = useState('All');
   const [filterAcc,  setFilterAcc]    = useState('All');
-  const [filterDate, setFilterDate]   = useState('All');
+  const [filterDate]                  = useState('All');
   const [filterBranch2, setFilterBranch2] = useState([]);
   const [filterCat2,  setFilterCat2]  = useState('All');
   const [filterSeg2,  setFilterSeg2]  = useState('All');
@@ -126,7 +126,7 @@ export default function ForecastSelection() {
   const [compSubsegment, setCompSubsegment] = useState([]);
 
   /* Chart-level filters */
-  const [trendScenFilter,  setTrendScenFilter]  = useState([]);
+  const [trendScenFilter]                        = useState([]);
   const [trendTimeRange,   setTrendTimeRange]   = useState('All');
   const [accScenFilter,    setAccScenFilter]    = useState([]);
   const [accTimeRange,     setAccTimeRange]     = useState('All');
@@ -221,7 +221,7 @@ export default function ForecastSelection() {
   };
 
   /* ── Derived comparison data ── */
-  const sc = comparison?.scenarios || [];
+  const sc = useMemo(() => comparison?.scenarios || [], [comparison]);
   const getVal = useCallback((runsArr, branch, sku, month) => {
     if (!runsArr) return 0;
     const row = runsArr.find(r => r.branch===branch && r.sku===sku && r.month===month);
