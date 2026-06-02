@@ -125,7 +125,11 @@ export default function NPIForecasting() {
     return MONTHS.map(month => {
       const sold    = Math.round(opening * str);
       const closing = Math.max(0, opening - sold);
-      const status  = opening === 0 ? 'Phase-out Complete' : closing === 0 ? 'Transition Complete' : 'Active';
+      let status;
+      if (closing > 500) status = 'Active';
+      else if (closing >= 100) status = 'Winding Down';
+      else if (closing >= 1) status = 'Critical Low';
+      else status = 'Depleted';
       const row     = { month, opening, sold, closing, status };
       opening       = closing;
       return row;
@@ -449,9 +453,16 @@ export default function NPIForecasting() {
                         <td style={tdStyle}>{row.sold.toLocaleString('en-IN')}</td>
                         <td style={{ ...tdStyle, fontWeight: 600, color: row.closing === 0 ? '#16A34A' : 'var(--text-1)' }}>{row.closing.toLocaleString('en-IN')}</td>
                         <td style={tdStyle}>
-                          <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: row.status === 'Transition Complete' || row.status === 'Phase-out Complete' ? '#F0FDF4' : '#FFFBEB', color: row.status === 'Transition Complete' || row.status === 'Phase-out Complete' ? '#16A34A' : '#D97706' }}>
-                            {row.status === 'Transition Complete' ? '✅ Transition Complete' : row.status === 'Phase-out Complete' ? '✅ Phase-out Complete' : '🔄 Active'}
-                          </span>
+                          {(() => {
+                            const cfg = {
+                              'Active':       { bg: '#EFF6FF', color: '#3B82F6', label: '● Active' },
+                              'Winding Down': { bg: '#FFFBEB', color: '#D97706', label: '⚠ Winding Down' },
+                              'Critical Low': { bg: '#FEF2F2', color: '#EF4444', label: '⚠ Critical Low' },
+                              'Depleted':     { bg: '#F0FDF4', color: '#16A34A', label: '✓ Depleted ✓' },
+                            };
+                            const c = cfg[row.status] || cfg['Active'];
+                            return <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: c.bg, color: c.color }}>{c.label}</span>;
+                          })()}
                         </td>
                       </tr>
                     ))}
@@ -491,9 +502,16 @@ export default function NPIForecasting() {
                       <div style={{ fontSize: 11, color: r.dark ? 'rgba(255,255,255,0.4)' : 'var(--text-2)', marginBottom: 14 }}>projected units · post-transition</div>
                       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 36, marginBottom: 8 }}>
                         {rampMonthly.map((v, i) => {
-                          const h = (v / maxV) * 100;
-                          const opacity = 0.35 + (i / rampMonthly.length) * 0.65;
-                          return <div key={i} style={{ flex: 1, borderRadius: '2px 2px 0 0', height: `${Math.max(h, v > 0 ? 5 : 0)}%`, background: r.dark ? `rgba(255,255,255,${opacity})` : r.tagColor, opacity: r.dark ? 1 : opacity }}/>;
+                          if (v === 0) return <div key={i} style={{ flex: 1 }}/>;
+                          const rawH = (v / maxV) * 100;
+                          const h = (i === transIdx) ? 15 : Math.max(rawH, 5);
+                          const opacity = parseFloat((0.35 + (i / 5) * 0.65).toFixed(2));
+                          const bg = r.dark
+                            ? `rgba(255,255,255,${opacity})`
+                            : r.tagColor === '#3B82F6'
+                              ? `rgba(59,130,246,${opacity})`
+                              : `rgba(22,163,74,${opacity})`;
+                          return <div key={i} style={{ flex: 1, borderRadius: '2px 2px 0 0', height: `${h}%`, background: bg }}/>;
                         })}
                       </div>
                       <div style={{ fontSize: 9, color: r.dark ? 'rgba(255,255,255,0.35)' : 'var(--text-3)', lineHeight: 1.4 }}>
@@ -528,19 +546,22 @@ export default function NPIForecasting() {
                       <tr key={row.month} style={{ background: i % 2 === 0 ? 'var(--card)' : '#FAFAFA' }}>
                         <td style={{ ...tdStyle, fontWeight: 600 }}>{row.month} '26</td>
                         <td style={{ ...tdStyle, color: row.oldSku === 0 ? '#9CA3AF' : '#D97706', fontWeight: row.oldSku > 0 ? 600 : 400 }}>{row.oldSku.toLocaleString('en-IN')}</td>
-                        <td style={{ ...tdStyle, color: row.newSku === 0 ? '#9CA3AF' : 'var(--navy-accent)', fontWeight: row.newSku > 0 ? 600 : 400 }}>{row.newSku.toLocaleString('en-IN')}</td>
-                        <td style={{ ...tdStyle, fontWeight: 700, background: '#EFF3FF', color: 'var(--navy-accent)' }}>{row.total.toLocaleString('en-IN')}</td>
+                        <td style={{ ...tdStyle, color: row.newSku === 0 ? '#9CA3AF' : '#16A34A', fontWeight: row.newSku > 0 ? 600 : 400 }}>{row.newSku.toLocaleString('en-IN')}</td>
+                        <td style={{ ...tdStyle, fontWeight: 700, color: 'var(--navy-accent)' }}>{row.total.toLocaleString('en-IN')}</td>
                       </tr>
                     ))}
-                    <tr style={{ background: '#F0FDF4', fontWeight: 700 }}>
+                    <tr style={{ background: '#F0F4F8', fontWeight: 700 }}>
                       <td style={{ ...tdStyle, fontWeight: 700 }}>6M Total</td>
                       <td style={{ ...tdStyle, fontWeight: 700, color: '#D97706' }}>{computeRenovBlended().reduce((s, r) => s + r.oldSku, 0).toLocaleString('en-IN')}</td>
-                      <td style={{ ...tdStyle, fontWeight: 700, color: 'var(--navy-accent)' }}>{computeRenovBlended().reduce((s, r) => s + r.newSku, 0).toLocaleString('en-IN')}</td>
-                      <td style={{ ...tdStyle, fontWeight: 800, background: '#DCFCE7', color: '#16A34A' }}>{computeRenovBlended().reduce((s, r) => s + r.total, 0).toLocaleString('en-IN')}</td>
+                      <td style={{ ...tdStyle, fontWeight: 700, color: '#16A34A' }}>{computeRenovBlended().reduce((s, r) => s + r.newSku, 0).toLocaleString('en-IN')}</td>
+                      <td style={{ ...tdStyle, fontWeight: 700, color: 'var(--navy-accent)' }}>{computeRenovBlended().reduce((s, r) => s + r.total, 0).toLocaleString('en-IN')}</td>
                     </tr>
                   </tbody>
                 </table>
               </div>
+              <p style={{ margin: '8px 0 0 0', fontSize: 12, color: 'var(--text-2)', fontStyle: 'italic' }}>
+                The Combined Total is what gets submitted to your supply chain and manufacturing plan.
+              </p>
               <div style={{ marginTop: 16 }}>
                 <button onClick={handleSave} style={{ background: '#16A34A', color: 'white', border: 'none', borderRadius: 12, padding: '13px 28px', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
                   ✓ Use {Object.entries(results).find(([k]) => k === selected)?.[1]?.tag} as Forecast → Save to Cycle
