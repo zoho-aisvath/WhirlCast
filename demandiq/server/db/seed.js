@@ -79,6 +79,15 @@ function seed() {
   db.exec('DELETE FROM product_master');
   db.exec('DELETE FROM users');
 
+  // Reset autoincrement counters so IDs restart from 1 on every seed/reset
+  try {
+    db.exec(`DELETE FROM sqlite_sequence WHERE name IN (
+      'forecast_cycles','forecast_runs','forecast_scenarios',
+      'branch_overrides','demand_sensing_log','exception_log',
+      'npi_forecasts','lfl_master','users'
+    )`);
+  } catch (_) {}
+
   // Products
   const insertProduct = db.prepare(`INSERT OR REPLACE INTO product_master (sku, category, segment, subsegment, price, star_rating, active, launch_date) VALUES (?,?,?,?,?,?,1,'2023-01-01')`);
   for (const p of PRODUCTS) insertProduct.run(p.sku, p.category, p.segment, p.subsegment, p.price, p.star_rating);
@@ -178,4 +187,6 @@ function seed() {
   console.log('Seed data inserted successfully (Jun–Nov 2026 forecast period)');
 }
 
-seed();
+module.exports = { seed };
+
+if (require.main === module) seed();

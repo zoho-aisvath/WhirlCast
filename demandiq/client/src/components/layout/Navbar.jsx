@@ -217,6 +217,12 @@ export default function Navbar() {
                     fontSize: 12, cursor: 'pointer' }}>
                   {dark ? '☀' : '◑'}
                 </button>
+                <button onClick={() => { setMenuOpen(false); setShowResetModal(true); }} disabled={resetting}
+                  style={{ background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.2)',
+                    color: 'rgba(255,255,255,0.55)', borderRadius: 8, padding: '7px 12px',
+                    fontSize: 12, cursor: 'pointer' }}>
+                  {resetting ? '⟳' : '↺'}
+                </button>
                 <button onClick={() => { logout(); navigate('/login'); setMenuOpen(false); }}
                   style={{ background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.3)',
                     color: '#EF4444', borderRadius: 8, padding: '7px 12px',
