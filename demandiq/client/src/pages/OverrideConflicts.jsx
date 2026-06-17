@@ -55,6 +55,33 @@ const SKU_META = {
   'IH_3B_SmartGlass':    { segment:'3 Burner',   subsegment:'Smart Glass' },
 };
 
+/* ── Pure cascade helper — proportional scale with rounding correction ── */
+function cascadeValues(cellMap, newTotal) {
+  const cells = Object.entries(cellMap);
+  if (cells.length === 0) return {};
+  const origTotal = cells.reduce((s, [, v]) => s + v, 0);
+  const result = {};
+
+  if (origTotal === 0) {
+    /* Edge case: no baseline — distribute equally, largest cell absorbs remainder */
+    const base = Math.floor(newTotal / cells.length);
+    let rem = newTotal - base * cells.length;
+    cells.forEach(([k]) => { result[k] = Math.max(0, base + (rem-- > 0 ? 1 : 0)); });
+  } else {
+    /* Proportional distribution */
+    let total = 0, maxK = null, maxV = -1;
+    cells.forEach(([k, v]) => {
+      const nv = Math.max(0, Math.round(v / origTotal * newTotal));
+      result[k] = nv; total += nv;
+      if (nv > maxV) { maxV = nv; maxK = k; }
+    });
+    /* Rounding correction: adjust the largest cell so the sum matches exactly */
+    const drift = newTotal - total;
+    if (drift !== 0 && maxK !== null) result[maxK] = Math.max(0, result[maxK] + drift);
+  }
+  return result;
+}
+
 const CatBadge = ({ cat }) => {
   const c = CAT_COLORS[cat] || { bg:'F3F4F6', text:'374151' };
   return <span style={{ background:`#${c.bg}`, color:`#${c.text}`, fontSize:9, fontWeight:600, padding:'1px 6px', borderRadius:20 }}>{cat}</span>;
@@ -246,54 +273,55 @@ export default function OverrideConflicts() {
 
   const dc = (pct) => Math.abs(pct) < 10 ? '#16A34A' : Math.abs(pct) < 20 ? '#D97706' : '#DC2626';
 
-  /* ── Cascade: category 6M total → all branches × SKUs × months ── */
+  /* ── CASE B: category 6M total → all branches × SKUs × months ── */
   const cascadeCat6M = (cat, newTotal) => {
-    const orig = getCat6MEff(cat);
-    if (orig === 0) return;
     setEdits(prev => {
-      const next = { ...prev };
-      for (const b of Object.keys(catBranchSkuData[cat] || {})) {
-        for (const s of Object.keys(catBranchSkuData[cat][b] || {})) {
+      const cellMap = {};
+      for (const b of Object.keys(catBranchSkuData[cat] || {}))
+        for (const s of Object.keys(catBranchSkuData[cat][b] || {}))
           for (const m of MONTHS_FWD) {
             const k = `${b}|${s}|${m}`;
-            const cur = prev[k] !== undefined ? prev[k] : (ovMap[b]?.[s]?.[m]?.value ?? aiMap[b]?.[s]?.[m] ?? 0);
-            next[k] = Math.max(0, Math.round(cur / orig * newTotal));
+            cellMap[k] = prev[k] !== undefined ? prev[k] : (ovMap[b]?.[s]?.[m]?.value ?? aiMap[b]?.[s]?.[m] ?? 0);
           }
-        }
-      }
-      return next;
+      return { ...prev, ...cascadeValues(cellMap, newTotal) };
     });
   };
 
-  /* ── Cascade: category month total → all branches × SKUs for that month ── */
+  /* ── CASE A: category month → all branches × SKUs for that month ── */
   const cascadeCatMonth = (cat, month, newVal) => {
-    const orig = getCatMonthEff(cat, month);
-    if (orig === 0) return;
     setEdits(prev => {
-      const next = { ...prev };
-      for (const b of Object.keys(catBranchSkuData[cat] || {})) {
+      const cellMap = {};
+      for (const b of Object.keys(catBranchSkuData[cat] || {}))
         for (const s of Object.keys(catBranchSkuData[cat][b] || {})) {
           const k = `${b}|${s}|${month}`;
-          const cur = prev[k] !== undefined ? prev[k] : (ovMap[b]?.[s]?.[month]?.value ?? aiMap[b]?.[s]?.[month] ?? 0);
-          next[k] = Math.max(0, Math.round(cur / orig * newVal));
+          cellMap[k] = prev[k] !== undefined ? prev[k] : (ovMap[b]?.[s]?.[month]?.value ?? aiMap[b]?.[s]?.[month] ?? 0);
         }
-      }
-      return next;
+      return { ...prev, ...cascadeValues(cellMap, newVal) };
     });
   };
 
-  /* ── Cascade: branch month total → SKUs for that branch × month ── */
+  /* ── CASE C: branch month → SKUs for that branch × month ── */
   const cascadeBranchMonth = (cat, branch, month, newVal) => {
-    const orig = getBranchMonthEff(cat, branch, month);
-    if (orig === 0) return;
     setEdits(prev => {
-      const next = { ...prev };
+      const cellMap = {};
       for (const s of Object.keys(catBranchSkuData[cat]?.[branch] || {})) {
         const k = `${branch}|${s}|${month}`;
-        const cur = prev[k] !== undefined ? prev[k] : (ovMap[branch]?.[s]?.[month]?.value ?? aiMap[branch]?.[s]?.[month] ?? 0);
-        next[k] = Math.max(0, Math.round(cur / orig * newVal));
+        cellMap[k] = prev[k] !== undefined ? prev[k] : (ovMap[branch]?.[s]?.[month]?.value ?? aiMap[branch]?.[s]?.[month] ?? 0);
       }
-      return next;
+      return { ...prev, ...cascadeValues(cellMap, newVal) };
+    });
+  };
+
+  /* ── CASE D: branch 6M total → all SKUs × months for that branch ── */
+  const cascadeBranch6M = (cat, branch, newTotal) => {
+    setEdits(prev => {
+      const cellMap = {};
+      for (const s of Object.keys(catBranchSkuData[cat]?.[branch] || {}))
+        for (const m of MONTHS_FWD) {
+          const k = `${branch}|${s}|${m}`;
+          cellMap[k] = prev[k] !== undefined ? prev[k] : (ovMap[branch]?.[s]?.[m]?.value ?? aiMap[branch]?.[s]?.[m] ?? 0);
+        }
+      return { ...prev, ...cascadeValues(cellMap, newTotal) };
     });
   };
 
@@ -318,7 +346,9 @@ export default function OverrideConflicts() {
     setSavingCat(cat);
     try {
       await fetch('/api/conflicts/category-override', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ overrides: toSave }) });
-      toast.success('Override saved and cascaded to branch × SKU level.');
+      const branchSet = new Set(toSave.map(o => o.branch));
+      const skuSet    = new Set(toSave.map(o => o.sku));
+      toast.success(`Forecast updated — changes cascaded to ${branchSet.size} branches and ${skuSet.size} SKUs. Reflected in all reports.`);
       setEdits(prev => {
         const next = { ...prev };
         for (const b of Object.keys(catBranchSkuData[cat] || {})) {
@@ -404,7 +434,7 @@ export default function OverrideConflicts() {
   const filteredOverrides = filterBranch ? overrides.filter(o => o.branch === filterBranch) : overrides;
 
   /* ── Grid column template ── */
-  const GRID_TPL = '190px repeat(6, 72px) 92px 92px 65px 90px';
+  const GRID_TPL = '190px 80px 100px repeat(6, 72px) 92px 92px 65px 90px';
 
   /* ═══════════════════════════════════════════════════════════ RENDER */
   return (
@@ -480,6 +510,8 @@ export default function OverrideConflicts() {
             {/* Grid header */}
             <div style={{ display:'grid', gridTemplateColumns:GRID_TPL, background:'#F8FAFF', borderBottom:'0.5px solid var(--border)', padding:'8px 12px', fontSize:10, fontWeight:600, color:'var(--text-2)', textTransform:'uppercase', letterSpacing:'0.05em', alignItems:'center', minWidth:900 }}>
               <div>Category / Branch / SKU</div>
+              <div>Segment</div>
+              <div>Subsegment</div>
               {MONTHS_LBL.map(m => <div key={m} style={{textAlign:'center'}}>{m}</div>)}
               <div style={{textAlign:'right'}}>6M Total</div>
               <div style={{textAlign:'right'}}>AI Forecast</div>
@@ -508,6 +540,10 @@ export default function OverrideConflicts() {
                         <span style={{ fontSize:10, color:'#6B7280', userSelect:'none' }}>{isCatOpen ? '▼' : '▶'}</span>
                         <span title={cat}>{cat.length > 22 ? cat.split(' ').slice(0,2).join(' ') : cat}</span>
                       </div>
+
+                      {/* Segment / Subsegment — blank at category level */}
+                      <div/>
+                      <div/>
 
                       {/* Month cells — editable (category_team, expanded only); plain text otherwise */}
                       {MONTHS_FWD.map((m, mi) => {
@@ -573,6 +609,10 @@ export default function OverrideConflicts() {
                               {branch}
                             </div>
 
+                            {/* Segment / Subsegment — blank at branch level */}
+                            <div/>
+                            <div/>
+
                             {MONTHS_FWD.map(m => {
                               const brMonthVal = getBranchMonthEff(cat, branch, m);
                               return (
@@ -585,7 +625,12 @@ export default function OverrideConflicts() {
                               );
                             })}
 
-                            <div style={{textAlign:'right', fontSize:12, fontWeight:600, color:'#1B3A6B', paddingRight:4}}>{br6M.toLocaleString('en-IN')}</div>
+                            <div style={{textAlign:'right', paddingRight:4}}>
+                              {isReadOnly || isBrOpen
+                                ? <span style={{fontSize:12, fontWeight:600, color:'#1B3A6B'}}>{br6M.toLocaleString('en-IN')}</span>
+                                : renderInput(`br6m|${cat}|${branch}`, br6M, (n) => cascadeBranch6M(cat, branch, n), false, hasBrEdit)
+                              }
+                            </div>
                             <div style={{textAlign:'right', fontSize:11, color:'var(--text-3)', paddingRight:4}}>{brAI.toLocaleString('en-IN')}</div>
 
                             <div style={{textAlign:'center'}}>
@@ -618,12 +663,9 @@ export default function OverrideConflicts() {
 
                                 <div style={{ paddingLeft:40, overflow:'hidden' }}>
                                   <div style={{ fontSize:10, fontFamily:'monospace', color:'#6B7280', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={sku}>{sku}</div>
-                                  {SKU_META[sku] && (
-                                    <div style={{ fontSize:9, color:'#9CA3AF', marginTop:1, whiteSpace:'nowrap' }}>
-                                      {SKU_META[sku].segment} · {SKU_META[sku].subsegment}
-                                    </div>
-                                  )}
                                 </div>
+                                <div style={{ fontSize:11, color:'var(--text-2)', display:'flex', alignItems:'center' }}>{SKU_META[sku]?.segment || '—'}</div>
+                                <div style={{ fontSize:11, color:'var(--text-2)', display:'flex', alignItems:'center' }}>{SKU_META[sku]?.subsegment || '—'}</div>
 
                                 {MONTHS_FWD.map(m => (
                                   <div key={m} style={{textAlign:'center', padding:'0 2px'}}>
@@ -800,19 +842,19 @@ export default function OverrideConflicts() {
             </div>
 
             <div style={{ background:'var(--card)', borderRadius:12, boxShadow:'var(--shadow-sm)', border:'0.5px solid var(--border)' }}>
-              <div style={{ overflowX:'auto' }}>
-                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:900 }}>
+              <div style={{ overflowX:'auto', width:'100%' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:1150 }}>
                   <thead>
                     <tr style={{ background:'#F8FAFF' }}>
-                      {['Branch','SKU','Month','AI Forecast','Override Value','Reason','By','Deviation%','Decision','Final Override'].map(h => (
-                        <th key={h} style={{ padding:'10px 12px', fontSize:10, fontWeight:600, color:'#6B7280', textTransform:'uppercase', letterSpacing:'0.04em', borderBottom:'1px solid #E5E7EB', textAlign:'left', whiteSpace:'nowrap' }}>{h}</th>
+                      {['Branch','SKU','Segment','Subsegment','Month','AI Forecast','Override Value','Reason','By','Deviation%','Decision','Final Override'].map(h => (
+                        <th key={h} style={{ padding:'10px 12px', fontSize:10, fontWeight:600, color:'#6B7280', textTransform:'uppercase', letterSpacing:'0.04em', borderBottom:'1px solid #E5E7EB', textAlign:'left', whiteSpace:'nowrap', ...(h==='Branch'?{position:'sticky',left:0,background:'#F8FAFF',zIndex:2}:{}) }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {filteredOverrides.length === 0 ? (
                       <tr>
-                        <td colSpan={10} style={{ padding:40, textAlign:'center', color:'var(--text-2)', fontSize:13 }}>
+                        <td colSpan={12} style={{ padding:40, textAlign:'center', color:'var(--text-2)', fontSize:13 }}>
                           {filterBranch ? `No conflicts for ${filterBranch}.` : 'No conflicts found.'}
                         </td>
                       </tr>
@@ -823,7 +865,7 @@ export default function OverrideConflicts() {
                       const rowBg  = dec?.decision === 'accept' ? '#F0FDF4' : dec?.decision === 'reject' ? '#FFFBEB' : i % 2 === 0 ? '#FFF' : '#FAFAFA';
                       return (
                         <tr key={i} style={{ background:rowBg }}>
-                          <td style={{ padding:'10px 12px', fontWeight:500 }}>
+                          <td style={{ padding:'10px 12px', fontWeight:500, position:'sticky', left:0, background:rowBg, zIndex:1 }}>
                             <div style={{ display:'flex', alignItems:'center', gap:6 }}>
                               <span style={{ width:7, height:7, borderRadius:'50%', background: CONFLICT_MAP[ov.branch] === 'conflict' ? '#F59E0B' : CONFLICT_MAP[ov.branch] === 'warning' ? '#F97316' : '#22C55E', flexShrink:0, display:'inline-block' }}/>
                               {ov.branch}
@@ -831,11 +873,10 @@ export default function OverrideConflicts() {
                           </td>
                           <td style={{ padding:'10px 12px' }}>
                             <div style={{ fontSize:11, color:'#6B7280', marginBottom:2 }}>{ov.sku}</div>
-                            {SKU_META[ov.sku] && (
-                              <div style={{ fontSize:9, color:'#9CA3AF', marginBottom:3 }}>{SKU_META[ov.sku].segment} · {SKU_META[ov.sku].subsegment}</div>
-                            )}
                             <CatBadge cat={CAT_MAP[ov.sku] || 'Other'}/>
                           </td>
+                          <td style={{ padding:'10px 12px', fontSize:11, color:'var(--text-2)', whiteSpace:'nowrap' }}>{SKU_META[ov.sku]?.segment || '—'}</td>
+                          <td style={{ padding:'10px 12px', fontSize:11, color:'var(--text-2)', whiteSpace:'nowrap' }}>{SKU_META[ov.sku]?.subsegment || '—'}</td>
                           <td style={{ padding:'10px 12px', whiteSpace:'nowrap' }}>{ov.month?.replace('-2026',"'26")}</td>
                           <td style={{ padding:'10px 12px' }}>{(ov.ai_forecast||0).toLocaleString('en-IN')}</td>
                           <td style={{ padding:'10px 12px', fontWeight:600 }}>{(ov.override_value||0).toLocaleString('en-IN')}</td>

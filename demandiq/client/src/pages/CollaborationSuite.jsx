@@ -24,6 +24,18 @@ const CatBadge = ({ cat }) => {
   return <span style={{ background:`#${c.bg}`, color:`#${c.text}`, fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:20, whiteSpace:'nowrap' }}>{cat}</span>;
 };
 const REASONS  = ['A: Increase in ranging','B: New Promo/Activity','C: Pricing Change','D: Repipeline','E: Seasonality effects','F: Competitor Activity','G: Others'];
+const SKU_META = {
+  'REF_190L_DirectCool': { segment:'180-200L',  subsegment:'Single Door' },
+  'REF_240L_FrostFree':  { segment:'240L',       subsegment:'Double Door' },
+  'REF_340L_TripleDoor': { segment:'340L',       subsegment:'Triple Door' },
+  'WM_7KG_TopLoad':      { segment:'7KG',        subsegment:'Top Load' },
+  'WM_8KG_FrontLoad':    { segment:'8KG',        subsegment:'Front Load' },
+  'WM_6.5KG_SemiAuto':   { segment:'6.5KG',      subsegment:'Semi-Automatic' },
+  'AC_1.5T_Inverter':    { segment:'1.5 Ton',    subsegment:'Inverter Split' },
+  'AC_2.0T_Split':       { segment:'2.0 Ton',    subsegment:'Split' },
+  'MW_25L_Convection':   { segment:'25L',        subsegment:'Convection' },
+  'IH_3B_SmartGlass':    { segment:'3 Burner',   subsegment:'Smart Glass' },
+};
 const MONTHS   = ['06-2026','07-2026','08-2026','09-2026','10-2026','11-2026'];
 const MONTH_LABELS = ["Jun'26","Jul'26","Aug'26","Sep'26","Oct'26","Nov'26"];
 
@@ -176,7 +188,7 @@ export default function CollaborationSuite() {
     ? (allBranchData[activeBranch]?.tableData || [])
     : BRANCHES.flatMap(b => (allBranchData[b]?.tableData || []).map(r => ({ ...r, _branch: b })));
 
-  const colCount = (showBranchCol ? 1 : 0) + 4 + MONTHS.length + (showActionsCol ? 1 : 0);
+  const colCount = (showBranchCol ? 1 : 0) + 6 + MONTHS.length + (showActionsCol ? 1 : 0);
 
   return (
     <div style={{ padding: isMobile ? '16px' : '24px', maxWidth: 1440, margin: '0 auto', background: 'var(--bg)', minHeight: 'calc(100vh - 52px)', paddingBottom: isMobile ? 80 : undefined }}>
@@ -269,12 +281,12 @@ export default function CollaborationSuite() {
             <div style={{ padding:40, textAlign:'center', color:'var(--text-2)', fontSize:13 }}>Loading branch data…</div>
           ) : (
             <div style={{ overflowX:'auto', overflowY:'auto', maxHeight:460 }}>
-              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth: showBranchCol ? 980 : 900 }}>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth: showBranchCol ? 1160 : 1080 }}>
                 <thead>
                   <tr style={{ background:'#F8FAFF', position:'sticky', top:0, zIndex:1 }}>
                     {[
                       ...(showBranchCol ? ['Branch'] : []),
-                      'SKU','Category','Last 6M Actual','AI Forecast (6M)',
+                      'SKU','Segment','Subsegment','Category','Last 6M Actual','AI Forecast (6M)',
                       ...MONTH_LABELS,
                       ...(showActionsCol ? ['Actions'] : []),
                     ].map(h => (
@@ -313,6 +325,8 @@ export default function CollaborationSuite() {
                               {row.sku}
                             </div>
                           </td>
+                          <td style={{ padding:'10px 12px', fontSize:11, color:'var(--text-2)', whiteSpace:'nowrap' }}>{SKU_META[row.sku]?.segment || '—'}</td>
+                          <td style={{ padding:'10px 12px', fontSize:11, color:'var(--text-2)', whiteSpace:'nowrap' }}>{SKU_META[row.sku]?.subsegment || '—'}</td>
                           <td style={{ padding:'10px 12px' }}><CatBadge cat={row.category}/></td>
                           <td style={{ padding:'10px 12px', color:'var(--text-1)' }}>{(row.last_6m_actual || row.months[0]?.last_6m_actual || 0).toLocaleString('en-IN')}</td>
                           <td style={{ padding:'10px 12px', fontWeight:600 }}>{aiTotal.toLocaleString('en-IN')}</td>

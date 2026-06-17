@@ -204,6 +204,7 @@ export default function ForecastSelection() {
       const resp = await fetch('/api/scenarios/compare', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ scenario_ids:selected }) });
       const data = await resp.json();
       setComparison(data);
+      setSelectedCompLines(null);
       setCompBranch([]); setCompSku([]); setCompCat('All'); setCompSegment([]); setCompSubsegment([]); setViewLevel('Branch × SKU');
     } catch { toast.error('Compare failed'); }
     finally { setComparing(false); }
@@ -221,7 +222,7 @@ export default function ForecastSelection() {
   };
 
   /* ── Derived comparison data ── */
-  const sc = comparison?.scenarios || [];
+  const sc = useMemo(() => comparison?.scenarios || [], [comparison]);
   const getVal = useCallback((runsArr, branch, sku, month) => {
     if (!runsArr) return 0;
     const row = runsArr.find(r => r.branch===branch && r.sku===sku && r.month===month);
@@ -268,8 +269,25 @@ export default function ForecastSelection() {
     return sc.map(s => s.name); // National
   }, [sc, viewLevel, effBranches, effSkus, compCat]);
 
-  /* Active comparison lines (top-3 auto when no manual selection) */
-  const activeCompLines = useMemo(() => selectedCompLines || chartLineKeys.slice(0, 3), [selectedCompLines, chartLineKeys]);
+  /* Active comparison lines — default interleaves all scenarios so every selected scenario is visible */
+  const activeCompLines = useMemo(() => {
+    if (selectedCompLines) return selectedCompLines;
+    if (!sc.length || !chartLineKeys.length) return [];
+    /* Branch × SKU: pick top-3 SKUs × every scenario using the first branch,
+       so 2 selected scenarios → 6 lines each labeled with their own scenario name */
+    if (viewLevel === 'Branch × SKU' && sc.length >= 2 && effBranches.length && effSkus.length) {
+      const branch = effBranches[0];
+      const topSkus = effSkus.slice(0, 3);
+      const lines = [];
+      for (const sku of topSkus) {
+        for (const s of sc) {
+          lines.push(`${s.name} — ${sku} — ${branch}`);
+        }
+      }
+      return lines;
+    }
+    return chartLineKeys.slice(0, 3);
+  }, [selectedCompLines, chartLineKeys, viewLevel, sc, effBranches, effSkus]);
 
   /* Chart data — respects View Level */
   const chartData = useMemo(() => {
@@ -427,7 +445,7 @@ export default function ForecastSelection() {
                     <div style={{ display:'flex', gap:4, alignItems:'center', marginTop:2, flexWrap:'wrap' }}>
                       <span style={{ fontSize:9, color:'var(--text-3)' }}>{new Date(s.created_at).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}</span>
                       <span style={{ background:'#E8EEF7', color:'#1B3A6B', borderRadius:4, padding:'0 4px', fontSize:9, fontWeight:600 }}>{s.algorithm_mix?.split('+')[0]?.trim()||'SARIMAX'}</span>
-                      {s.segment_filter && <span style={{ background:'#F0FDFA', color:'#0F766E', borderRadius:4, padding:'0 4px', fontSize:9, fontWeight:600 }}>{s.segment_filter.split(',')[0]}</span>}
+                      <span style={{ background:'#F0FDFA', color:'#0F766E', borderRadius:4, padding:'0 4px', fontSize:9, fontWeight:600 }}>{s.segment_filter ? s.segment_filter.split(',')[0] : 'All Segments'}</span>
                       {s.branch_filter && <span style={{ background:'#FDF4FF', color:'#7C3AED', borderRadius:4, padding:'0 4px', fontSize:9, fontWeight:600 }}>{s.branch_filter.split(',').slice(0,2).join(',')}{s.branch_filter.split(',').length>2?'+':''}</span>}
                       {s.status==='finalized' && <span style={{ background:'#16A34A', color:'white', borderRadius:4, padding:'0 4px', fontSize:9 }}>Final</span>}
                     </div>
@@ -675,6 +693,8 @@ export default function ForecastSelection() {
                           <>
                             <th style={{ ...thStyle, textAlign:'left', position:'sticky', left:0, background:'#F8FAFC', zIndex:2 }}>Branch</th>
                             <th style={{ ...thStyle, textAlign:'left', position:'sticky', left:80, background:'#F8FAFC', zIndex:2 }}>SKU</th>
+                            <th style={{ ...thStyle, textAlign:'left' }}>Segment</th>
+                            <th style={{ ...thStyle, textAlign:'left' }}>Subsegment</th>
                           </>
                         ) : (
                           <th style={{ ...thStyle, textAlign:'left' }}>{viewLevel === 'Branch' ? 'Branch' : viewLevel === 'Category' ? 'Category' : 'Level'}</th>
@@ -696,6 +716,8 @@ export default function ForecastSelection() {
                               <>
                                 <td style={{ ...tdStyle, textAlign:'left', position:'sticky', left:0, background:'inherit', fontWeight:600 }}>{row.label1}</td>
                                 <td style={{ ...tdStyle, textAlign:'left', position:'sticky', left:80, background:'inherit', fontSize:10, color:'var(--text-2)', fontFamily:'monospace' }}>{row.label2}</td>
+                                <td style={{ ...tdStyle, textAlign:'left', fontSize:11 }}>{SKU_DETAILS[row.label2]?.segment || '—'}</td>
+                                <td style={{ ...tdStyle, textAlign:'left', fontSize:11 }}>{SKU_DETAILS[row.label2]?.subsegment || '—'}</td>
                               </>
                             ) : (
                               <td style={{ ...tdStyle, textAlign:'left', fontWeight:600 }}>{row.label1}</td>

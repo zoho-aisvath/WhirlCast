@@ -22,31 +22,34 @@ router.post('/compare', (req, res) => {
   try {
     const db = getDb();
     const { scenario_ids } = req.body;
-    if (!scenario_ids || scenario_ids.length < 2) return res.status(400).json({ error: 'Need at least 2 scenarios' });
+    if (!Array.isArray(scenario_ids) || scenario_ids.length < 2) {
+      return res.status(400).json({ error: 'Need at least 2 scenario_ids' });
+    }
 
-    const scenarios = scenario_ids.map(id => db.prepare(`SELECT * FROM forecast_scenarios WHERE scenario_id=?`).get(id)).filter(Boolean);
+    /* Coerce to integers and build IN clause — no fallback to any other scenario */
+    const ids = scenario_ids.map(Number).filter(n => !isNaN(n) && n > 0);
+    const placeholders = ids.map(() => '?').join(',');
+    const scenarios = db.prepare(
+      `SELECT * FROM forecast_scenarios WHERE scenario_id IN (${placeholders})`
+    ).all(...ids);
 
-    /* Strictly query only the requested scenario_ids — no fallback to finalized or any other scenario */
-    const comparisonData = scenarios.map(s => {
+    if (scenarios.length !== ids.length) {
+      db.close();
+      return res.status(404).json({ error: 'One or more scenarios not found' });
+    }
+
+    /* Preserve the caller's selection order; query runs per scenario_id exactly */
+    const comparisonData = ids.map(id => {
+      const s = scenarios.find(sc => sc.scenario_id === id);
       const runs = db.prepare(
         `SELECT branch, sku, month, value FROM forecast_runs WHERE scenario_id=? AND month IN ('06-2026','07-2026','08-2026','09-2026','10-2026','11-2026')`
-      ).all(s.scenario_id);
-
-      const branchData = {};
-      BRANCHES.forEach(b => {
-        const md = {};
-        MONTHS_FWD.forEach(m => {
-          md[m] = runs.filter(r => r.branch === b && r.month === m).reduce((a, r) => a + r.value, 0);
-        });
-        branchData[b] = md;
-      });
-
-      return { ...s, branchData, runs };
+      ).all(id);
+      return { ...s, runs };
     });
 
-    const trendData = MONTHS_FWD.map((month, mi) => {
+    const trendData = MONTHS_FWD.map((month) => {
       const obj = { month };
-      scenarios.forEach((s, si) => {
+      comparisonData.forEach((s, si) => {
         obj[`accuracy_s${si+1}`] = Math.round((s.accuracy || 85) + (Math.random() * 4 - 2));
         obj[`bias_s${si+1}`]     = parseFloat(((s.bias || 4) + (Math.random() * 2 - 1)).toFixed(1));
       });
@@ -54,7 +57,7 @@ router.post('/compare', (req, res) => {
     });
 
     db.close();
-    res.json({ scenarios: comparisonData, trendData, fallbackMap: {} });
+    res.json({ scenarios: comparisonData, trendData });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

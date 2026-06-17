@@ -111,18 +111,27 @@ router.post('/category-override', (req, res) => {
 
     for (const ov of overrides) {
       const val = Math.max(0, Math.round(ov.value));
-      const existing = db.prepare(`SELECT * FROM branch_overrides WHERE cycle_id=? AND branch=? AND sku=? AND month=?`).get(cycle.cycle_id, ov.branch, ov.sku, ov.month);
 
-      if (existing) {
-        db.prepare(`UPDATE branch_overrides SET override_value=?, reason='Category override', override_by='Category Team', override_on=datetime('now'), override_version=override_version+1, status='submitted' WHERE override_id=?`).run(val, existing.override_id);
-      } else {
-        const aiVal = sid ? (db.prepare(`SELECT value FROM forecast_runs WHERE scenario_id=? AND branch=? AND sku=? AND month=? LIMIT 1`).get(sid, ov.branch, ov.sku, ov.month)?.value || 0) : 0;
-        db.prepare(`INSERT INTO branch_overrides (cycle_id, branch, sku, month, ai_forecast, override_value, reason, override_by, override_on, override_version, status) VALUES (?,?,?,?,?,?,?,?,datetime('now'),1,'submitted')`).run(cycle.cycle_id, ov.branch, ov.sku, ov.month, aiVal, val, 'Category override', 'Category Team');
-      }
-
+      /* 1. Update forecast_runs directly — category team edits are FINAL */
       if (sid) {
         db.prepare(`UPDATE forecast_runs SET value=? WHERE branch=? AND sku=? AND month=? AND scenario_id=?`).run(val, ov.branch, ov.sku, ov.month, sid);
       }
+
+      /* 2. If a branch override row already exists (branch manager raised it),
+            resolve it immediately — do NOT leave it as 'submitted' */
+      const existing = db.prepare(`SELECT override_id FROM branch_overrides WHERE cycle_id=? AND branch=? AND sku=? AND month=?`).get(cycle.cycle_id, ov.branch, ov.sku, ov.month);
+      if (existing) {
+        db.prepare(
+          `UPDATE branch_overrides SET final_override=?, status='resolved', override_by='Category Team (National Edit)', override_on=datetime('now') WHERE override_id=?`
+        ).run(val, existing.override_id);
+      }
+      /* 3. No existing row → do NOT create one. Never insert status='submitted'. */
+    }
+
+    /* Re-check whether all submitted overrides are now resolved */
+    const pending = db.prepare(`SELECT COUNT(*) as cnt FROM branch_overrides WHERE cycle_id=? AND status='submitted'`).get(cycle.cycle_id);
+    if (pending.cnt === 0) {
+      db.prepare(`UPDATE forecast_cycles SET status='resolved' WHERE cycle_id=?`).run(cycle.cycle_id);
     }
 
     db.close();
