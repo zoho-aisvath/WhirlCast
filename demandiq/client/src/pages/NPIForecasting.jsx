@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { PageHeader } from '../components/shared/PageHeader';
+import { KPICard } from '../components/shared/KPICard';
 import { useToast } from '../components/shared/Toast';
 import { ComposedChart, Area, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
@@ -42,6 +43,10 @@ const RESULTS = {
     monthly: [2600,3400,4000,4200,4200,4200], dark: false,
   },
 };
+
+// Channel release factor per month offset from new-SKU transition (offset 0 = first ramp month).
+// Swap any entry for a dynamic value when channel data is available.
+const CHANNEL_RELEASE_FACTORS = [0.5, 1.0, 1.0, 1.0, 1.0, 1.0];
 
 const REQUIRED_FIELDS = ['sku', 'category', 'price', 'launch'];
 const LOOKALIKE_LINES = ['Recommended', 'Conservative', 'Optimistic'];
@@ -149,7 +154,7 @@ export default function NPIForecasting() {
     return d;
   };
 
-  /* ── Renovation: blended total ── */
+  /* ── Renovation: blended total with unconstrained demand and deferred units ── */
   const computeRenovBlended = () => {
     if (!results || npiType !== 'renovation') return [];
     const phaseOut = computePhaseOut();
@@ -163,7 +168,13 @@ export default function NPIForecasting() {
         const ri = i - transIdx;
         newSku = RESULTS.recommended.monthly[Math.min(ri, RESULTS.recommended.monthly.length - 1)] || 0;
       }
-      return { month, oldSku, newSku, total: oldSku + newSku };
+      const offset = i - transIdx;
+      const factor = (i >= transIdx && offset < CHANNEL_RELEASE_FACTORS.length)
+        ? CHANNEL_RELEASE_FACTORS[offset]
+        : 1.0;
+      const unconstrained = newSku > 0 ? Math.round(newSku / factor) : 0;
+      const raw = unconstrained - newSku;
+      return { month, oldSku, newSku, unconstrained, deferred: raw > 0 ? raw : 0, total: oldSku + newSku };
     });
   };
 
@@ -415,6 +426,7 @@ export default function NPIForecasting() {
       {/* ══════════════════════════════════ RENOVATION OUTPUT ══════════════════════════════════ */}
       {results && npiType === 'renovation' && (() => {
         const phaseOutRows = computePhaseOut();
+        const blendedRows  = computeRenovBlended();
         const transDate    = getTransitionDate();
         const oldSkuName   = selectedLflEntry?.old_sku || 'Old SKU';
         const newSkuName   = selectedLflEntry?.new_sku || 'New SKU';
@@ -505,48 +517,100 @@ export default function NPIForecasting() {
               </div>
             </div>
 
-            {/* Section C: Blended Total Forecast */}
-            <div style={{ background: 'var(--card)', borderRadius: 16, padding: 24, boxShadow: 'var(--shadow-sm)', border: '0.5px solid var(--border)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                <div style={{ width: 28, height: 28, background: '#16A34A', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'white', flexShrink: 0 }}>C</div>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>Blended Total Forecast</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>Actual plan submitted to supply — combined old and new SKU demand</div>
+            {/* Section C: Transition Demand & Supply Plan */}
+            {(() => {
+              const total6m    = blendedRows.reduce((s, r) => s + r.total, 0);
+              const deferred6m = blendedRows.reduce((s, r) => s + r.deferred, 0);
+              const peakRow    = blendedRows.reduce(
+                (mx, r) => (r.deferred > 0 && r.deferred > mx.deferred) ? r : mx,
+                { deferred: 0, month: '—' }
+              );
+              return (
+                <div style={{ background: 'var(--card)', borderRadius: 16, padding: 24, boxShadow: 'var(--shadow-sm)', border: '0.5px solid var(--border)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                    <div style={{ width: 28, height: 28, background: '#16A34A', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'white', flexShrink: 0 }}>C</div>
+                    <div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>Transition Demand &amp; Supply Plan</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>Unconstrained new-SKU demand vs. the constrained sell-in plan, reconciled against old-SKU phase-out.</div>
+                    </div>
+                  </div>
+
+                  {/* 3-stat callout row */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, marginBottom: 20 }}>
+                    <KPICard
+                      label="Combined Total (6M)"
+                      value={total6m.toLocaleString('en-IN')}
+                      subtitle="Old SKU sell-through + new SKU sell-in"
+                      accentColor="#16A34A"
+                      icon="📦"
+                    />
+                    <KPICard
+                      label="Demand Deferred (6M)"
+                      value={deferred6m > 0 ? deferred6m.toLocaleString('en-IN') : '—'}
+                      subtitle="Units held back due to channel constraint"
+                      accentColor="#D97706"
+                      icon="⏳"
+                    />
+                    <KPICard
+                      label="Peak Constraint Month"
+                      value={deferred6m > 0 ? `${peakRow.month} '26` : '—'}
+                      subtitle="Month with highest deferred demand"
+                      accentColor="#F59E0B"
+                      icon="📅"
+                    />
+                  </div>
+
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr>
+                          <th style={thStyle}>Month</th>
+                          <th style={thStyle}>{oldSkuName} Sell-Through</th>
+                          <th style={{ ...thStyle, color: '#9CA3AF', fontStyle: 'italic' }}>New-SKU Unconstrained Demand</th>
+                          <th style={thStyle}>{newSkuName} Planned Sell-In</th>
+                          <th style={thStyle}>Combined Total</th>
+                          <th style={{ ...thStyle, color: '#D97706' }}>
+                            Demand Deferred{' '}
+                            <span
+                              title="Units the new SKU could sell if fully stocked, but held back to avoid double-inventory risk while the old SKU clears. Recoverable by accelerating old-SKU clearance."
+                              style={{ cursor: 'help', fontSize: 11, opacity: 0.85 }}>ⓘ</span>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {blendedRows.map((row, i) => (
+                          <tr key={row.month} style={{ background: i % 2 === 0 ? 'var(--card)' : '#FAFAFA' }}>
+                            <td style={{ ...tdStyle, fontWeight: 600 }}>{row.month} '26</td>
+                            <td style={{ ...tdStyle, color: row.oldSku === 0 ? '#9CA3AF' : '#D97706', fontWeight: row.oldSku > 0 ? 600 : 400 }}>{row.oldSku.toLocaleString('en-IN')}</td>
+                            <td style={{ ...tdStyle, color: '#9CA3AF', fontStyle: 'italic' }}>{row.unconstrained > 0 ? row.unconstrained.toLocaleString('en-IN') : '—'}</td>
+                            <td style={{ ...tdStyle, color: row.newSku === 0 ? '#9CA3AF' : 'var(--navy-accent)', fontWeight: row.newSku > 0 ? 600 : 400 }}>{row.newSku.toLocaleString('en-IN')}</td>
+                            <td style={{ ...tdStyle, fontWeight: 700, background: '#EFF3FF', color: 'var(--navy-accent)' }}>{row.total.toLocaleString('en-IN')}</td>
+                            <td style={{ ...tdStyle, color: row.deferred > 0 ? '#D97706' : '#9CA3AF', fontWeight: row.deferred > 0 ? 600 : 400, background: row.deferred > 0 ? '#FFFBEB' : 'transparent' }}>
+                              {row.deferred > 0 ? row.deferred.toLocaleString('en-IN') : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                        <tr style={{ background: '#F0FDF4', fontWeight: 700 }}>
+                          <td style={{ ...tdStyle, fontWeight: 700 }}>6M Total</td>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: '#D97706' }}>{blendedRows.reduce((s, r) => s + r.oldSku, 0).toLocaleString('en-IN')}</td>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: '#9CA3AF', fontStyle: 'italic' }}>{blendedRows.reduce((s, r) => s + r.unconstrained, 0).toLocaleString('en-IN')}</td>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: 'var(--navy-accent)' }}>{blendedRows.reduce((s, r) => s + r.newSku, 0).toLocaleString('en-IN')}</td>
+                          <td style={{ ...tdStyle, fontWeight: 800, background: '#DCFCE7', color: '#16A34A' }}>{blendedRows.reduce((s, r) => s + r.total, 0).toLocaleString('en-IN')}</td>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: '#D97706', background: '#FFFBEB' }}>
+                            {deferred6m > 0 ? deferred6m.toLocaleString('en-IN') : '—'}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{ marginTop: 16 }}>
+                    <button onClick={handleSave} style={{ background: '#16A34A', color: 'white', border: 'none', borderRadius: 12, padding: '13px 28px', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+                      ✓ Use {Object.entries(results).find(([k]) => k === selected)?.[1]?.tag} as Forecast → Save to Cycle
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                  <thead>
-                    <tr>
-                      {['Month', `${oldSkuName} Units`, `${newSkuName} Units`, 'Combined Total'].map(h => (
-                        <th key={h} style={thStyle}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {computeRenovBlended().map((row, i) => (
-                      <tr key={row.month} style={{ background: i % 2 === 0 ? 'var(--card)' : '#FAFAFA' }}>
-                        <td style={{ ...tdStyle, fontWeight: 600 }}>{row.month} '26</td>
-                        <td style={{ ...tdStyle, color: row.oldSku === 0 ? '#9CA3AF' : '#D97706', fontWeight: row.oldSku > 0 ? 600 : 400 }}>{row.oldSku.toLocaleString('en-IN')}</td>
-                        <td style={{ ...tdStyle, color: row.newSku === 0 ? '#9CA3AF' : 'var(--navy-accent)', fontWeight: row.newSku > 0 ? 600 : 400 }}>{row.newSku.toLocaleString('en-IN')}</td>
-                        <td style={{ ...tdStyle, fontWeight: 700, background: '#EFF3FF', color: 'var(--navy-accent)' }}>{row.total.toLocaleString('en-IN')}</td>
-                      </tr>
-                    ))}
-                    <tr style={{ background: '#F0FDF4', fontWeight: 700 }}>
-                      <td style={{ ...tdStyle, fontWeight: 700 }}>6M Total</td>
-                      <td style={{ ...tdStyle, fontWeight: 700, color: '#D97706' }}>{computeRenovBlended().reduce((s, r) => s + r.oldSku, 0).toLocaleString('en-IN')}</td>
-                      <td style={{ ...tdStyle, fontWeight: 700, color: 'var(--navy-accent)' }}>{computeRenovBlended().reduce((s, r) => s + r.newSku, 0).toLocaleString('en-IN')}</td>
-                      <td style={{ ...tdStyle, fontWeight: 800, background: '#DCFCE7', color: '#16A34A' }}>{computeRenovBlended().reduce((s, r) => s + r.total, 0).toLocaleString('en-IN')}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <div style={{ marginTop: 16 }}>
-                <button onClick={handleSave} style={{ background: '#16A34A', color: 'white', border: 'none', borderRadius: 12, padding: '13px 28px', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
-                  ✓ Use {Object.entries(results).find(([k]) => k === selected)?.[1]?.tag} as Forecast → Save to Cycle
-                </button>
-              </div>
-            </div>
+              );
+            })()}
 
           </div>
         );
